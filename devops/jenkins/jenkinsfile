@@ -25,6 +25,8 @@ pipeline {
     environment {
       CREDS_GITHUB_REGISTRY = credentials('creds-github-registry')
       CREDS_DEV_SERVER = credentials('creds-dev-server')
+      TOKEN_SONARQUBE	 = credentials('token_sonarqube')
+      SONAR_ARGS="-Dsonar.projectKey=sonar-dev-lxm -Dsonar.host.url=http://tools-sonar.boat-house.cn -Dsonar.login=${TOKEN_SONARQUBE} -Dsonar.sources=src/main -Dsonar.tests=src/test"
       def server=''
     }
 
@@ -39,7 +41,7 @@ pipeline {
 
         // 构建
         stage('build') {
-          // 多个平行的任务，全部通过才能进入下一个 阶段（stage）
+          // 多个并行的任务，全部通过才能进入下一个 阶段（stage）
           parallel {
 
             // 统计服务打包
@@ -62,26 +64,31 @@ pipeline {
                 sh "docker push ${BOATHOUSE_CONTAINER_REGISTRY}/${BOATHOUSE_ORG_NAME}/boat-house-backend/statistics_service_worker:latest"
                 sh "docker push ${BOATHOUSE_CONTAINER_REGISTRY}/${BOATHOUSE_ORG_NAME}/boat-house-backend/statistics_service_worker:${env.BRANCH_NAME}-${env.BUILD_ID}"
               }
+              post {
+                success {
+                  sh "docker rmi ${BOATHOUSE_CONTAINER_REGISTRY}/${BOATHOUSE_ORG_NAME}/boat-house-backend/statistics_service_api:latest"
+                  sh "docker rmi ${BOATHOUSE_CONTAINER_REGISTRY}/${BOATHOUSE_ORG_NAME}/boat-house-backend/statistics_service_api:${env.BRANCH_NAME}-${env.BUILD_ID}"
+
+                  sh "docker rmi ${BOATHOUSE_CONTAINER_REGISTRY}/${BOATHOUSE_ORG_NAME}/boat-house-backend/statistics_service_worker:latest"
+                  sh "docker rmi ${BOATHOUSE_CONTAINER_REGISTRY}/${BOATHOUSE_ORG_NAME}/boat-house-backend/statistics_service_worker:${env.BRANCH_NAME}-${env.BUILD_ID}"
+                }
+              }
             }
 
             // 产品服务打包
             stage('build-product-service') {
               steps {
-                sh 'mvn clean cobertura:cobertura'
+                //sh 'mvn clean cobertura:cobertura'
 
                 echo "docker-compose restart..."
-                sh "docker-compose -f src/product-service/api/docker-compose.build.yaml stop"
-                sh "docker-compose -f src/product-service/api/docker-compose.build.yaml up"
+                sh "docker-compose -f src/product-service/api/docker-compose.build.yaml -p api_product stop"
+                sh "docker-compose -f src/product-service/api/docker-compose.build.yaml -p api_product up"
 
                 // junit
                 echo "junit..."
                 junit 'src/product-service/api/target/surefire-reports/**/TEST-*.xml'
 
-                // Requires Cobertura plugin to archive and display converage report
-                // https://plugins.jenkins.io/cobertura/
-                echo "Archive coverage report"                
-                cobertura autoUpdateHealth: false, autoUpdateStability: false, coberturaReportFile: 'src/product-service/api/target/site/cobertura/coverage.xml', conditionalCoverageTargets: '70, 0, 0', failUnhealthy: false, failUnstable: false, lineCoverageTargets: '80, 0, 0', maxNumberOfBuilds: 0, methodCoverageTargets: '80, 0, 0', onlyStable: false, sourceEncoding: 'ASCII', zoomCoverageChart: false
-                                
+              
                 echo "docker build..."
                 sh "docker build -f src/product-service/api/Dockerfile.image -t ${BOATHOUSE_CONTAINER_REGISTRY}/${BOATHOUSE_ORG_NAME}/boat-house-backend/product_service_api:${env.BRANCH_NAME}-${env.BUILD_ID} -t ${BOATHOUSE_CONTAINER_REGISTRY}/${BOATHOUSE_ORG_NAME}/boat-house-backend/product_service_api:latest src/product-service/api"
 
@@ -97,14 +104,20 @@ pipeline {
                 echo "Publish Junit Report..."
                 publishHTML([allowMissing: false, alwaysLinkToLastBuild: false, keepAll: true, reportDir: './src/product-service/api/target/site/jacoco-it', reportFiles: 'index.html', reportName: 'Junit Report', reportTitles: ''])
               }
+              post {
+                success {
+                  sh "docker rmi ${BOATHOUSE_CONTAINER_REGISTRY}/${BOATHOUSE_ORG_NAME}/boat-house-backend/product_service_api:latest"
+                  sh "docker rmi ${BOATHOUSE_CONTAINER_REGISTRY}/${BOATHOUSE_ORG_NAME}/boat-house-backend/product_service_api:${env.BRANCH_NAME}-${env.BUILD_ID}"
+                }
+              }
             }
             
             // 用户信息服务器打包
             stage('build-account-service') {
               steps {
                 echo "docker-compose restart..."
-                sh "docker-compose -f src/account-service/api/docker-compose.build.yaml stop"
-                sh "docker-compose -f src/account-service/api/docker-compose.build.yaml up"
+                sh "docker-compose -f src/account-service/api/docker-compose.build.yaml -p api_account stop"
+                sh "docker-compose -f src/account-service/api/docker-compose.build.yaml -p api_account up"
 
                 // junit
                 // echo "junit..."
@@ -113,8 +126,7 @@ pipeline {
 
                 // Requires Cobertura plugin to archive and display converage report
                 // https://plugins.jenkins.io/cobertura/
-                echo "Archive coverage report..."  
-                cobertura autoUpdateHealth: false, autoUpdateStability: false, coberturaReportFile: 'src/account-service/api/target/site/cobertura/coverage.xml', conditionalCoverageTargets: '70, 0, 0', failUnhealthy: false, failUnstable: false, lineCoverageTargets: '80, 0, 0', maxNumberOfBuilds: 0, methodCoverageTargets: '80, 0, 0', onlyStable: false, sourceEncoding: 'ASCII', zoomCoverageChart: false
+             
               
                 echo "docker build..."
                 sh "docker build -f src/account-service/api/Dockerfile.image -t ${BOATHOUSE_CONTAINER_REGISTRY}/${BOATHOUSE_ORG_NAME}/boat-house-backend/account_service_api:${env.BRANCH_NAME}-${env.BUILD_ID} -t ${BOATHOUSE_CONTAINER_REGISTRY}/${BOATHOUSE_ORG_NAME}/boat-house-backend/account_service_api:latest src/account-service/api"
@@ -126,6 +138,12 @@ pipeline {
                 echo "push service api..."
                 sh "docker push ${BOATHOUSE_CONTAINER_REGISTRY}/${BOATHOUSE_ORG_NAME}/boat-house-backend/account_service_api:latest"
                 sh "docker push ${BOATHOUSE_CONTAINER_REGISTRY}/${BOATHOUSE_ORG_NAME}/boat-house-backend/account_service_api:${env.BRANCH_NAME}-${env.BUILD_ID}"
+              }
+              post {
+                success {
+                  sh "docker rmi ${BOATHOUSE_CONTAINER_REGISTRY}/${BOATHOUSE_ORG_NAME}/boat-house-backend/account_service_api:latest"
+                  sh "docker rmi ${BOATHOUSE_CONTAINER_REGISTRY}/${BOATHOUSE_ORG_NAME}/boat-house-backend/account_service_api:${env.BRANCH_NAME}-${env.BUILD_ID}"
+                }
               }
             }
           }
@@ -161,7 +179,7 @@ pipeline {
                 
                 echo "successfully started!..."
               }
-            } 
+            }
         }
  
         // 基于dev环境进行jmeter测试
@@ -214,6 +232,8 @@ pipeline {
     post {
       always {
         sh "sudo git clean -fdx"
+
+        sh "docker rmi \$(docker images | grep none | awk '{print \$3}')"
         //sh "sudo rm -rf src/product-service/api/target"
         //sh "sudo rm -rf src/account-service/api/target"
       }

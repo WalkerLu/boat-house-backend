@@ -1,26 +1,26 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: statistics-service-redis-deployment
+  name: phpmyadmin
   namespace: #{DEPLOY_K8S_NAMESPACE_PROD}#
 spec:
   replicas: 1
   selector: 
     matchLabels:
-      app: statistics-service-redis
-  strategy: {}
+      app: phpmyadmin
   template:
     metadata:
       labels:
-        app: statistics-service-redis
+        app: phpmyadmin
     spec:
       containers:
-      - image: redis:alpine
-        name: redis
+      - image: phpmyadmin:5.0.4-apache
+        name: phpmyadmin
         ports:
-        - containerPort: 6379
-        resources: {}
-      restartPolicy: Always
+        - containerPort: 8080
+        env:
+          - name: PMA_ARBITRARY
+            value: "1"
       imagePullSecrets:
       - name: regcred
       restartPolicy: Always
